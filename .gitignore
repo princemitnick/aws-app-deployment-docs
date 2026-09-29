@@ -1,0 +1,19 @@
+# Identifiants et secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.ssh/
+secrets/
+
+# Données et sorties locales
+*.log
+*.sqlite
+*.sqlite3
+*.db
+backups/
+node_modules/
+.DS_Store
