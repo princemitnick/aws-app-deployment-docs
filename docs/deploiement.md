@@ -22,11 +22,11 @@ free -h
 
 | Contrôle | Résultat / date |
 | --- | --- |
-| Version Ubuntu | **À RENSEIGNER** |
-| Version Docker Engine | **À RENSEIGNER** |
-| Version du plugin Docker Compose | **À RENSEIGNER** |
-| Docker actif | **À RENSEIGNER** |
-| Espace libre sur le volume | **À RENSEIGNER** |
+| Version Ubuntu | **24.04** |
+| Version Docker Engine | **29.8.1** |
+| Version du plugin Docker Compose | **v5.5** |
+| Docker actif | **Oui** |
+| Espace libre sur le volume | **30 Go** |
 
 La forme actuelle de Compose est `docker compose` (plugin), à confirmer sur l'hôte avec la commande ci-dessus. Le lien d'installation Docker fourni par l'équipe mentionne `docker-compose-plugin` parmi les paquets installables.
 
