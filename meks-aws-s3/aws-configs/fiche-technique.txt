@@ -1,0 +1,165 @@
+================================================================================
+FICHE TECHNIQUE INFRASTRUCTURE : CONFIGURATION AWS S3 & IAM — PROJET MEKS
+================================================================================
+Objectif : Mise en place d'un stockage d'objets sécurisé, privé et évolutif sur
+Amazon S3 pour les images de l'application MEKS (avatars utilisateurs et preuves
+de dépôts bancaires), avec accès applicatif restreint par URLs présignées.
+
+--------------------------------------------------------------------------------
+1. ARCHITECTURE RETENUE
+--------------------------------------------------------------------------------
+Deux compartiments (buckets) S3 distincts et 100 % privés :
+- Bucket 1 : meks-user-avatars  (Photos de profil des utilisateurs)
+- Bucket 2 : meks-bank-proofs   (Preuves de dépôts bancaires — données critiques)
+
+Règles de sécurité globales :
+- Aucun accès public direct (Block All Public Access activé sur les 2 buckets).
+- Chiffrement serveur par défaut activé (SSE-S3 / AES-256).
+- Gestion des versions (Versioning) activée sur le bucket des preuves bancaires.
+- Accès en écriture (PUT) et lecture (GET) uniquement via des URLs présignées
+  temporaires générées par le backend de l'application.
+
+--------------------------------------------------------------------------------
+2. ÉTAPE 1 : CRÉATION DES COMPARTIMENTS S3 (CONSOLE AWS)
+--------------------------------------------------------------------------------
+2.1 Bucket des photos de profil (meks-user-avatars)
+  1. Ouvrir la Console AWS > Service S3 > "Créer un compartiment" (Create bucket).
+  2. Région AWS : Sélectionner la même région que le serveur d'application
+     (ex. ca-central-1 ou us-east-1).
+  3. Nom du compartiment : meks-user-avatars
+     (ajouter un suffixe unique si déjà pris, ex. meks-user-avatars-prod).
+  4. Propriété de l'objet : Laisser "ACL désactivées (recommandé)".
+  5. Paramètres de blocage de l'accès public : Laisser "Bloquer tout l'accès
+     public" COCHÉ.
+  6. Gestion des versions : Désactivée.
+  7. Chiffrement par défaut : SSE-S3 (Clés gérées par Amazon S3).
+  8. Cliquer sur "Créer un compartiment".
+
+2.2 Bucket des preuves bancaires (meks-bank-proofs)
+  1. Cliquer sur "Créer un compartiment" dans la même région AWS.
+  2. Nom du compartiment : meks-bank-proofs
+  3. Paramètres de blocage de l'accès public : Laisser "Bloquer tout l'accès
+     public" COCHÉ.
+  4. Gestion des versions du compartiment (Bucket Versioning) : ACTIVER
+     (protège les justificatifs financiers contre toute suppression accidentelle).
+  5. Chiffrement par défaut : SSE-S3 (Clés gérées par Amazon S3).
+  6. Cliquer sur "Créer un compartiment".
+
+--------------------------------------------------------------------------------
+3. ÉTAPE 2 : CONFIGURATION CORS SUR LES DEUX BUCKETS
+--------------------------------------------------------------------------------
+Indispensable pour autoriser le navigateur / frontend à envoyer directement les
+fichiers vers S3 via les URLs présignées.
+
+Procédure (à répéter sur meks-user-avatars ET meks-bank-proofs) :
+  1. Ouvrir le compartiment dans S3 > Onglet "Autorisations" (Permissions).
+  2. Descendre jusqu'à la section "Partage des ressources cross-origin (CORS)".
+  3. Cliquer sur "Modifier" (Edit), coller le JSON ci-dessous et enregistrer :
+
+[
+    {
+        "AllowedHeaders": [
+            "*"
+        ],
+        "AllowedMethods": [
+            "GET",
+            "PUT",
+            "POST",
+            "HEAD"
+        ],
+        "AllowedOrigins": [
+            "*"
+        ],
+        "ExposeHeaders": [
+            "ETag"
+        ],
+        "MaxAgeSeconds": 3600
+    }
+]
+
+Note sécurité production : Une fois le domaine final de l'application en ligne,
+remplacer "*" dans "AllowedOrigins" par l'URL exacte du frontend
+(ex. ["https://app.meks.com"]).
+
+--------------------------------------------------------------------------------
+4. ÉTAPE 3 : CRÉATION DE LA POLITIQUE ET DE L'UTILISATEUR IAM
+--------------------------------------------------------------------------------
+4.1 Créer la politique IAM sur mesure (Moindre privilège)
+  1. Ouvrir la Console AWS > Service IAM > "Politiques" > "Créer une politique".
+  2. Sélectionner l'éditeur "JSON" et coller la politique suivante :
+
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "MeksBucketsList",
+            "Effect": "Allow",
+            "Action": [
+                "s3:ListBucket",
+                "s3:GetBucketLocation"
+            ],
+            "Resource": [
+                "arn:aws:s3:::meks-user-avatars",
+                "arn:aws:s3:::meks-bank-proofs"
+            ]
+        },
+        {
+            "Sid": "MeksObjectsReadWrite",
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:DeleteObject"
+            ],
+            "Resource": [
+                "arn:aws:s3:::meks-user-avatars/*",
+                "arn:aws:s3:::meks-bank-proofs/*"
+            ]
+        }
+    ]
+}
+
+  3. Cliquer sur "Suivant", nommer la politique : MEKS-S3-App-Policy
+  4. Cliquer sur "Créer une politique".
+
+4.2 Créer l'utilisateur technique et générer ses clés d'accès
+  1. Dans IAM > "Utilisateurs" > "Créer un utilisateur".
+  2. Nom d'utilisateur : meks-s3-service-user
+     (Ne pas cocher l'accès à la console de gestion AWS).
+  3. Options d'autorisation : "Attacher directement les politiques".
+  4. Rechercher et cocher : MEKS-S3-App-Policy > Suivant > "Créer un utilisateur".
+  5. Ouvrir l'utilisateur meks-s3-service-user > Onglet "Informations
+     d'identification de sécurité" > "Créer une clé d'accès".
+  6. Cas d'utilisation : "Application s'exécutant en dehors d'AWS".
+  7. Récupérer AWS_ACCESS_KEY_ID et AWS_SECRET_ACCESS_KEY et les transmettre
+     au développeur par un canal sécurisé (jamais dans un dépôt Git).
+
+--------------------------------------------------------------------------------
+5. ÉTAPE 4 : OPTIMISATION DES COÛTS & SUPERVISION (RECOMMANDÉ)
+--------------------------------------------------------------------------------
+1. Règle de cycle de vie (Lifecycle Rule) sur meks-bank-proofs :
+   - Onglet "Gestion" (Management) > "Créer une règle de cycle de vie".
+   - Transitionner les versions actuelles de plus de 180 jours vers
+     "S3 Glacier Instant Retrieval" (coût divisé par 5, accès immédiat).
+   - Supprimer définitivement les versions non actuelles (anciennes versions
+     écrasées) après 90 jours.
+2. Alerte budgétaire :
+   - Console AWS Billing > Budgets > Créer un budget de coûts mensuel à 5 USD
+     avec notification par courriel.
+
+--------------------------------------------------------------------------------
+6. PARAMÈTRES D'INTÉGRATION POUR L'ÉQUIPE DE DÉVELOPPEMENT
+--------------------------------------------------------------------------------
+Variables d'environnement requises (.env) :
+  AWS_REGION=ca-central-1
+  AWS_ACCESS_KEY_ID=<TRANSMIS_PAR_CANAL_SECURISE>
+  AWS_SECRET_ACCESS_KEY=<TRANSMIS_PAR_CANAL_SECURISE>
+  S3_BUCKET_AVATARS=meks-user-avatars
+  S3_BUCKET_PROOFS=meks-bank-proofs
+
+Règles d'utilisation dans le code :
+- Écriture (Upload) : Générer une URL présignée PutObject (validité : 300 s).
+- Base de données : Stocker uniquement la clé de l'objet (ex. proofs/user_1/img.webp).
+- Lecture (Affichage) : Générer une URL présignée GetObject (validité : 900 s
+  pour les preuves bancaires, 3600 s pour les avatars).
+================================================================================
